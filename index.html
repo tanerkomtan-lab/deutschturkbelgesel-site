@@ -31,6 +31,76 @@
     align-items: center;
     gap: 10px;
     margin-bottom: 8px;
+    justify-content: space-between;
+  }
+  .brand-left {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+  }
+  .menu-btn {
+    flex-shrink: 0;
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--text);
+    width: 42px;
+    height: 42px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 20px;
+  }
+  .menu-btn:active { border-color: var(--lime); }
+
+  /* MENU OVERLAY (BBC Earth style full-screen nav) */
+  .menu-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: var(--bg);
+    z-index: 200;
+    overflow-y: auto;
+    padding: 20px;
+  }
+  .menu-overlay.open { display: block; }
+  .menu-overlay-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 30px;
+  }
+  .menu-close-btn {
+    background: none;
+    border: 1px solid var(--lime);
+    color: var(--lime);
+    width: 42px;
+    height: 42px;
+    font-size: 20px;
+    cursor: pointer;
+  }
+  .menu-list {
+    list-style: none;
+  }
+  .menu-list li {
+    border-bottom: 1px solid var(--border);
+  }
+  .menu-list button {
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: none;
+    color: var(--text);
+    font-size: 24px;
+    font-weight: 800;
+    padding: 20px 0;
+    cursor: pointer;
+    text-transform: capitalize;
+  }
+  .menu-list button:active,
+  .menu-list button.active-item {
+    color: var(--lime);
   }
   .brand-logo {
     width: 34px;
@@ -332,12 +402,26 @@
 
 <header>
   <div class="brand-row">
-    <div class="brand-logo">🦁</div>
-    <h1>DeutschTürkBelgesel</h1>
+    <div class="brand-left">
+      <div class="brand-logo">🦁</div>
+      <h1>DeutschTürkBelgesel</h1>
+    </div>
+    <button class="menu-btn" id="menuBtn">☰</button>
   </div>
   <p>Doğa, bilim ve tarih belgeselleri — BBC Earth, National Geographic, History</p>
   <div class="filters" id="filters"></div>
 </header>
+
+<div class="menu-overlay" id="menuOverlay">
+  <div class="menu-overlay-head">
+    <div class="brand-left">
+      <div class="brand-logo">🦁</div>
+      <h1 style="font-size:18px;">DeutschTürkBelgesel</h1>
+    </div>
+    <button class="menu-close-btn" id="menuCloseBtn">&times;</button>
+  </div>
+  <ul class="menu-list" id="menuList"></ul>
+</div>
 
 <main>
   <div id="content">
@@ -416,7 +500,42 @@ function buildFilters() {
       render();
     });
   });
+
+  buildMenu(kanallar);
 }
+
+function buildMenu(kanallar) {
+  const menuList = document.getElementById("menuList");
+  menuList.innerHTML = kanallar
+    .map(k => {
+      const label = k === "hepsi" ? "Hepsi" : (KANAL_LABELS[k] || k);
+      return `<li><button data-kanal="${k}" class="${k === currentFilter ? "active-item" : ""}">${label}</button></li>`;
+    })
+    .join("");
+
+  menuList.querySelectorAll("button").forEach(btn => {
+    btn.addEventListener("click", () => {
+      currentFilter = btn.dataset.kanal;
+      document.querySelectorAll(".filter-btn").forEach(b => {
+        b.classList.toggle("active", b.dataset.kanal === currentFilter);
+      });
+      document.querySelectorAll("#menuList button").forEach(b => b.classList.remove("active-item"));
+      btn.classList.add("active-item");
+      render();
+      closeMenu();
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    });
+  });
+}
+
+function openMenu() {
+  document.getElementById("menuOverlay").classList.add("open");
+}
+function closeMenu() {
+  document.getElementById("menuOverlay").classList.remove("open");
+}
+document.getElementById("menuBtn").addEventListener("click", openMenu);
+document.getElementById("menuCloseBtn").addEventListener("click", closeMenu);
 
 function attachCardEvents(root) {
   root.querySelectorAll(".card, .hero-card").forEach(card => {
