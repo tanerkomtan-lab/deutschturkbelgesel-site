@@ -1,6 +1,6 @@
 // fetch_news.mjs
 // RSS tabanlı haber toplayıcı — sadece başlık + özet + link + kaynak alır,
-// tam makale metnini ASLA kopyalamaz. Supabase tablosuna upsert eder.
+// tam makale metnini ASLA kopyalamaz.
 //
 // Kurulum: npm install
 // Çalıştırma: node fetch_news.mjs
@@ -10,10 +10,7 @@ import { XMLParser } from "fast-xml-parser";
 
 // --- Supabase bağlantı bilgileri: ortam değişkeninden okunuyor, koda gömülmüyor ---
 const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY; // service_role key (yazma yetkisi için)
-// Hangi tabloya yazılacağı ortam değişkeninden ayarlanır — mevcut çalışmanız dth_haberler üzerinde
-// olduğu için varsayılan onu kullanıyor. haberler tablosunu kullanmak isterseniz
-// SUPABASE_TABLE=haberler olarak ayarlamanız yeterli, kod değişikliği gerekmez.
+const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
 const SUPABASE_TABLE = process.env.SUPABASE_TABLE || "dth_haberler";
 
 if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
@@ -21,25 +18,23 @@ if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
   process.exit(1);
 }
 
-// --- Kaynak listesi: kategori + kaynak adı + RSS url ---
-// NOT: RSS adresleri yayıncılar tarafından zaman zaman değiştirilebilir.
-// Bir feed 404 verirse ilgili yayıncının "RSS feeds" sayfasından güncel adresi bulup buradan değiştirin.
+// --- Kaynak listesi: kısa kod (kaynak) + görünen isim (kaynak_ad) + kategori + RSS url ---
 const FEEDS = [
-  { kaynak: "BBC",       kategori: "Dünya",    url: "https://feeds.bbci.co.uk/news/world/rss.xml" },
-  { kaynak: "BBC Türkçe",kategori: "Türkiye",  url: "https://feeds.bbci.co.uk/turkce/rss.xml" },
-  { kaynak: "CNN",       kategori: "Dünya",    url: "http://rss.cnn.com/rss/cnn_topstories.rss" },
-  { kaynak: "DW",        kategori: "Almanya",  url: "https://rss.dw.com/rdf/rss-en-ger" },
-  { kaynak: "DW Türkçe", kategori: "Almanya",  url: "https://rss.dw.com/rdf/rss-tur-all" },
-  { kaynak: "Euronews",  kategori: "Avrupa",   url: "https://www.euronews.com/rss" },
-  { kaynak: "Al Jazeera",kategori: "Dünya",    url: "https://www.aljazeera.com/xml/rss/all.xml" },
-  { kaynak: "Hürriyet",  kategori: "Türkiye",  url: "https://www.hurriyet.com.tr/rss/anasayfa" },
-  { kaynak: "NTV",       kategori: "Türkiye",  url: "https://www.ntv.com.tr/son-dakika.rss" },
+  { kaynak: "bbc",       kaynak_ad: "BBC",                  kategori: "Dünya",   url: "https://feeds.bbci.co.uk/news/world/rss.xml" },
+  { kaynak: "bbc_tr",    kaynak_ad: "BBC Türkçe",           kategori: "Türkiye", url: "https://feeds.bbci.co.uk/turkce/rss.xml" },
+  { kaynak: "cnn",       kaynak_ad: "CNN",                  kategori: "Dünya",   url: "http://rss.cnn.com/rss/cnn_topstories.rss" },
+  { kaynak: "dw",        kaynak_ad: "DW",                   kategori: "Almanya", url: "https://rss.dw.com/rdf/rss-en-ger" },
+  { kaynak: "dw_tr",     kaynak_ad: "DW Türkçe",            kategori: "Almanya", url: "https://rss.dw.com/rdf/rss-tur-all" },
+  { kaynak: "euronews",  kaynak_ad: "Euronews",             kategori: "Avrupa",  url: "https://www.euronews.com/rss" },
+  { kaynak: "aljazeera", kaynak_ad: "Al Jazeera",           kategori: "Dünya",   url: "https://www.aljazeera.com/xml/rss/all.xml" },
+  { kaynak: "hurriyet",  kaynak_ad: "Hürriyet",             kategori: "Türkiye", url: "https://www.hurriyet.com.tr/rss/anasayfa" },
+  { kaynak: "ntv",       kaynak_ad: "NTV",                  kategori: "Türkiye", url: "https://www.ntv.com.tr/son-dakika.rss" },
 
   // --- NRW / Köln bölgesel kaynaklar ---
-  { kaynak: "WDR",              kategori: "NRW",  url: "https://www.wdr.de/xml/newsticker.rdf" },
-  { kaynak: "Kölner Stadt-Anzeiger", kategori: "Köln", url: "https://feed.ksta.de/feed/rss/index.rss" },
-  { kaynak: "Kölnische Rundschau",   kategori: "Köln", url: "https://www.rundschau-online.de/rss-feed.rssdata.xml" },
-  { kaynak: "Express Köln",     kategori: "Köln", url: "https://www.express.de/feed/index.rss" },
+  { kaynak: "wdr",       kaynak_ad: "WDR",                  kategori: "NRW",  url: "https://www.wdr.de/xml/newsticker.rdf" },
+  { kaynak: "ksta",      kaynak_ad: "Kölner Stadt-Anzeiger",kategori: "Köln", url: "https://feed.ksta.de/feed/rss/index.rss" },
+  { kaynak: "rundschau", kaynak_ad: "Kölnische Rundschau",  kategori: "Köln", url: "https://www.rundschau-online.de/rss-feed.rssdata.xml" },
+  { kaynak: "express_koeln", kaynak_ad: "Express Köln",     kategori: "Köln", url: "https://www.express.de/feed/index.rss" },
 ];
 
 const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: "@_" });
@@ -51,7 +46,6 @@ function stripHtml(str = "") {
 function cleanLink(url = "") {
   try {
     const u = new URL(url);
-    // izleme parametrelerini temizle (utm_*, ?at_medium vs.)
     [...u.searchParams.keys()].forEach(k => {
       if (/^(utm_|at_|ns_)/i.test(k)) u.searchParams.delete(k);
     });
@@ -74,7 +68,6 @@ async function fetchFeed(feed) {
     const xml = await res.text();
     const data = parser.parse(xml);
 
-    // RSS 2.0 ve RDF/Atom farklarını basitçe ele al
     const items =
       data?.rss?.channel?.item ||
       data?.["rdf:RDF"]?.item ||
@@ -94,13 +87,14 @@ async function fetchFeed(feed) {
       return {
         baslik: title,
         ozet,
-        kaynak_url: link,
+        link,
         kaynak: feed.kaynak,
+        kaynak_ad: feed.kaynak_ad,
         kategori: feed.kategori,
         yayin_tarihi: new Date(pubDate).toISOString(),
         durum: "yayinda",
       };
-    }).filter(n => n.baslik && n.kaynak_url);
+    }).filter(n => n.baslik && n.link);
   } catch (err) {
     console.error(`[UYARI] ${feed.kaynak} (${feed.url}) çekilemedi: ${err.message}`);
     return [];
@@ -109,9 +103,7 @@ async function fetchFeed(feed) {
 
 async function upsertNews(rows) {
   if (rows.length === 0) return;
-  // kaynak_url üzerinde UNIQUE constraint olduğunu varsayıyoruz (aynı haberi iki kez eklememek için).
-  // Tabloda yoksa: alter table ${SUPABASE_TABLE} add constraint ${SUPABASE_TABLE}_kaynak_url_key unique (kaynak_url);
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_TABLE}?on_conflict=kaynak_url`, {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_TABLE}?on_conflict=link`, {
     method: "POST",
     headers: {
       apikey: SUPABASE_SERVICE_KEY,
