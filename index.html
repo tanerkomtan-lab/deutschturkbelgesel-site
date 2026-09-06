@@ -19,10 +19,8 @@
     background: var(--bg);
     color: var(--text);
     -webkit-font-smoothing: antialiased;
-    padding-bottom: 90px; /* room for cookie bar */
+    padding-bottom: 90px;
   }
-
-  /* HEADER — DW style: brand left, icon group right */
   header {
     padding: 16px 20px 0;
     border-bottom: 1px solid var(--border);
@@ -47,7 +45,6 @@
     font-size: 18px; flex-shrink: 0; color: #000;
   }
   header h1 { font-size: 19px; font-weight: 900; letter-spacing: -0.5px; }
-
   .icon-group { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
   .icon-btn {
     background: none; border: 1px solid var(--border); color: var(--text);
@@ -62,8 +59,6 @@
     white-space: nowrap;
   }
   .live-dot { width: 7px; height: 7px; border-radius: 50%; background: #d10000; }
-
-  /* MENU OVERLAY (DW style: full list, categories + regions) */
   .menu-overlay {
     display: none;
     position: fixed; inset: 0; background: var(--bg);
@@ -87,8 +82,6 @@
     color: var(--text); font-size: 20px; font-weight: 700; padding: 14px 0; cursor: pointer;
   }
   .menu-list button.active-item { color: var(--accent); }
-
-  /* TOP FILTER PILLS */
   .filters { display: flex; gap: 8px; overflow-x: auto; padding: 4px 0 16px; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
   .filters::-webkit-scrollbar { display: none; }
   .filter-btn {
@@ -98,9 +91,7 @@
     cursor: pointer; white-space: nowrap;
   }
   .filter-btn.active { background: var(--accent); color: #000; border-color: var(--accent); }
-
   main { padding: 20px 20px 60px; max-width: 1200px; margin: 0 auto; }
-
   .section-head {
     display: flex; align-items: center; justify-content: space-between;
     margin-bottom: 16px; border-bottom: 1px solid var(--border); padding-bottom: 12px;
@@ -113,7 +104,6 @@
     text-decoration: underline; text-underline-offset: 4px;
     background: none; border: none; cursor: pointer; text-transform: uppercase;
   }
-
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; margin-bottom: 40px; }
   .card { background: var(--bg-card); overflow: hidden; border: 1px solid var(--border); }
   .card-body { padding: 16px; }
@@ -128,30 +118,24 @@
     display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
   .card-meta { display: flex; justify-content: space-between; align-items: center; font-size: 11px; color: var(--text-dim); }
   .read-link { color: var(--accent); font-weight: 700; text-decoration: none; }
-
   .hero-card { margin-bottom: 30px; border: 1px solid var(--border); background: var(--bg-card); }
   .hero-card .card-body { padding: 20px; }
   .hero-card .card-title { font-size: 22px; }
   .hero-card .card-desc { -webkit-line-clamp: 4; font-size: 14px; }
-
   .loading, .empty { text-align: center; padding: 80px 20px; color: var(--text-dim); font-weight: 600; }
   .spinner { width: 32px; height: 32px; border: 3px solid var(--border); border-top-color: var(--accent);
     border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto 14px; }
   @keyframes spin { to { transform: rotate(360deg); } }
-
   .load-more {
     display: block; margin: 0 auto 44px; padding: 12px 30px; background: transparent;
     border: 1px solid var(--accent); color: var(--accent); font-weight: 800; font-size: 12px;
     text-transform: uppercase; letter-spacing: 1px; cursor: pointer;
   }
   .load-more:disabled { opacity: 0.4; }
-
   footer { border-top: 1px solid var(--border); padding: 30px 20px 40px; text-align: center; }
   footer .footer-brand { color: var(--accent); font-weight: 900; font-size: 14px; text-transform: uppercase; margin-bottom: 10px; }
   footer p { color: var(--text-dim); font-size: 12px; line-height: 1.7; max-width: 620px; margin: 0 auto 10px; }
   footer .footer-links a { color: var(--text-dim); font-size: 12px; margin: 0 8px; text-decoration: underline; }
-
-  /* COOKIE BANNER */
   .cookie-bar {
     display: none; position: fixed; left: 0; right: 0; bottom: 0; z-index: 300;
     background: var(--bg-card); border-top: 1px solid var(--border);
@@ -164,8 +148,6 @@
   .cookie-btn { padding: 10px 16px; border-radius: 3px; font-size: 12px; font-weight: 800;
     text-transform: uppercase; letter-spacing: 0.5px; cursor: pointer; border: 1px solid var(--border); background: transparent; color: var(--text); }
   .cookie-btn.primary { background: var(--accent); color: #000; border-color: var(--accent); }
-
-  /* PRIVACY MODAL */
   .modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.9); z-index: 250;
     align-items: center; justify-content: center; padding: 16px; }
   .modal.open { display: flex; }
@@ -218,7 +200,6 @@
   </div>
 </footer>
 
-<!-- COOKIE CONSENT BAR -->
 <div class="cookie-bar" id="cookieBar">
   <p>Bu site, deneyiminizi iyileştirmek için çerezler kullanır. Detaylar için <a href="#" id="cookiePolicyLink">Gizlilik Politikası</a>'nı inceleyebilirsiniz.</p>
   <div class="cookie-actions">
@@ -227,7 +208,6 @@
   </div>
 </div>
 
-<!-- PRIVACY MODAL -->
 <div class="modal" id="privacyModal">
   <div class="modal-content">
     <button class="close-btn" id="closePrivacy">&times;</button>
@@ -250,14 +230,14 @@ const SUPABASE_URL = "https://zlvsbcqiwbfnkskkyigr.supabase.co";
 const SUPABASE_KEY = "sb_publishable_tKXa7uXaJ_QWWyHbMiJSmg_Wdl7nMzE";
 
 let allNews = [];
-let currentFilter = { type: "hepsi", value: "hepsi" }; // type: 'kategori' | 'kaynak' | 'hepsi'
+let currentFilter = { type: "hepsi", value: "hepsi" };
 const SECTIONS_SHOWN = {};
 const PAGE_SIZE = 9;
 
 async function fetchNews() {
   try {
     const res = await fetch(
-      `${SUPABASE_URL}/rest/v1/dth_haberler?select=id,baslik,ozet,kaynak_url,kategori,kaynak,yayin_tarihi,durum&durum=eq.yayinda&order=yayin_tarihi.desc&limit=500`,
+      `${SUPABASE_URL}/rest/v1/dth_haberler?select=id,baslik,ozet,link,kategori,kaynak,kaynak_ad,yayin_tarihi,durum&durum=eq.yayinda&order=yayin_tarihi.desc&limit=500`,
       { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
     );
     if (!res.ok) throw new Error("Fetch failed: " + res.status);
@@ -272,7 +252,7 @@ async function fetchNews() {
 
 function buildFilters() {
   const kategoriler = [...new Set(allNews.map(n => n.kategori).filter(Boolean))];
-  const kaynaklar = [...new Set(allNews.map(n => n.kaynak).filter(Boolean))];
+  const kaynaklar = [...new Set(allNews.map(n => n.kaynak_ad || n.kaynak).filter(Boolean))];
 
   const filtersEl = document.getElementById("filters");
   filtersEl.innerHTML =
@@ -323,7 +303,7 @@ function render() {
 
   let list = allNews;
   if (currentFilter.type === "kategori") list = allNews.filter(n => n.kategori === currentFilter.value);
-  if (currentFilter.type === "kaynak") list = allNews.filter(n => n.kaynak === currentFilter.value);
+  if (currentFilter.type === "kaynak") list = allNews.filter(n => (n.kaynak_ad || n.kaynak) === currentFilter.value);
 
   if (currentFilter.type !== "hepsi") {
     const key = currentFilter.value;
@@ -371,12 +351,12 @@ function heroHtml(n) {
   return `
     <div class="hero-card card">
       <div class="card-body">
-        <span class="kaynak-badge">${escapeHtml(n.kaynak || "")}</span><span class="kategori-tag">${escapeHtml(n.kategori || "")}</span>
+        <span class="kaynak-badge">${escapeHtml(n.kaynak_ad || n.kaynak || "")}</span><span class="kategori-tag">${escapeHtml(n.kategori || "")}</span>
         <p class="card-title">${safeTitle}</p>
         <p class="card-desc">${safeDesc}</p>
         <div class="card-meta">
           <span>${formatDate(n.yayin_tarihi)}</span>
-          <a class="read-link" href="${n.kaynak_url}" target="_blank" rel="noopener noreferrer">Habere Git →</a>
+          <a class="read-link" href="${n.link}" target="_blank" rel="noopener noreferrer">Habere Git →</a>
         </div>
       </div>
     </div>`;
@@ -388,12 +368,12 @@ function cardHtml(n) {
   return `
     <div class="card">
       <div class="card-body">
-        <span class="kaynak-badge">${escapeHtml(n.kaynak || "")}</span><span class="kategori-tag">${escapeHtml(n.kategori || "")}</span>
+        <span class="kaynak-badge">${escapeHtml(n.kaynak_ad || n.kaynak || "")}</span><span class="kategori-tag">${escapeHtml(n.kategori || "")}</span>
         <p class="card-title">${safeTitle}</p>
         <p class="card-desc">${safeDesc}</p>
         <div class="card-meta">
           <span>${formatDate(n.yayin_tarihi)}</span>
-          <a class="read-link" href="${n.kaynak_url}" target="_blank" rel="noopener noreferrer">Habere Git →</a>
+          <a class="read-link" href="${n.link}" target="_blank" rel="noopener noreferrer">Habere Git →</a>
         </div>
       </div>
     </div>`;
@@ -406,7 +386,6 @@ function formatDate(d) {
 }
 function escapeHtml(str) { const div = document.createElement("div"); div.textContent = str; return div.innerHTML; }
 
-/* ---- COOKIE CONSENT ---- */
 function initCookieBar() {
   const consent = localStorage.getItem("dth_cookie_consent");
   if (!consent) document.getElementById("cookieBar").classList.add("open");
@@ -424,7 +403,6 @@ document.getElementById("cookieSettingsLink").addEventListener("click", (e) => {
   document.getElementById("cookieBar").classList.add("open");
 });
 
-/* ---- PRIVACY MODAL ---- */
 function openPrivacy(e) { e.preventDefault(); document.getElementById("privacyModal").classList.add("open"); }
 document.getElementById("privacyLink").addEventListener("click", openPrivacy);
 document.getElementById("cookiePolicyLink").addEventListener("click", openPrivacy);
