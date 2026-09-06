@@ -1,14 +1,9 @@
 // fetch_news.mjs
 // RSS tabanlı haber toplayıcı — sadece başlık + özet + link + kaynak alır,
 // tam makale metnini ASLA kopyalamaz.
-//
-// Kurulum: npm install
-// Çalıştırma: node fetch_news.mjs
-// (GitHub Actions ile periyodik çalıştırmak için .github/workflows/fetch-news.yml dosyasına bakın)
 
 import { XMLParser } from "fast-xml-parser";
 
-// --- Supabase bağlantı bilgileri: ortam değişkeninden okunuyor, koda gömülmüyor ---
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
 const SUPABASE_TABLE = process.env.SUPABASE_TABLE || "dth_haberler";
@@ -18,7 +13,6 @@ if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
   process.exit(1);
 }
 
-// --- Kaynak listesi: kısa kod (kaynak) + görünen isim (kaynak_ad) + kategori + RSS url ---
 const FEEDS = [
   { kaynak: "bbc",       kaynak_ad: "BBC",                  kategori: "Dünya",   url: "https://feeds.bbci.co.uk/news/world/rss.xml" },
   { kaynak: "bbc_tr",    kaynak_ad: "BBC Türkçe",           kategori: "Türkiye", url: "https://feeds.bbci.co.uk/turkce/rss.xml" },
@@ -33,13 +27,19 @@ const FEEDS = [
   // --- NRW / Köln bölgesel kaynaklar ---
   { kaynak: "wdr",       kaynak_ad: "WDR",                  kategori: "NRW",  url: "https://www.wdr.de/xml/newsticker.rdf" },
   { kaynak: "ksta",      kaynak_ad: "Kölner Stadt-Anzeiger",kategori: "Köln", url: "https://feed.ksta.de/feed/rss/index.rss" },
-  { kaynak: "rundschau", kaynak_ad: "Kölnische Rundschau",  kategori: "Köln", url: "https://www.rundschau-online.de/rss-feed.rssdata.xml" },
-  { kaynak: "express_koeln", kaynak_ad: "Express Köln",     kategori: "Köln", url: "https://www.express.de/feed/index.rss" },
+  // Not: Kölnische Rundschau (rundschau-online.de) ve Express Köln (express.de) artık genel
+  // erişime açık bir RSS beslemesi yayınlamıyor (404/410 döndürüyorlar). Yeni bir adres
+  // bulunursa buraya aynı formatta eklenebilir.
 ];
 
 const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: "@_" });
 
 function stripHtml(str = "") {
+  if (typeof str !== "string") {
+    if (str == null) return "";
+    if (typeof str === "object" && "#text" in str) str = str["#text"];
+    else str = String(str);
+  }
   return str.replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").trim();
 }
 
@@ -73,7 +73,7 @@ async function fetchFeed(feed) {
       data?.["rdf:RDF"]?.item ||
       data?.feed?.entry ||
       [];
-    const list = Array.isArray(items) ? items : [items];
+    const list = (Array.isArray(items) ? items : [items]).slice(0, 40);
 
     return list.filter(Boolean).map(item => {
       const title = stripHtml(item.title?.["#text"] || item.title || "");
