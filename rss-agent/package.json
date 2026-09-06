@@ -1,0 +1,13 @@
+{
+  "name": "deutschturkhaber-rss-agent",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "RSS tabanli haber toplayici - baslik/ozet/link cekip Supabase'e ekler",
+  "main": "fetch_news.mjs",
+  "scripts": {
+    "start": "node fetch_news.mjs"
+  },
+  "dependencies": {
+    "fast-xml-parser": "^4.4.1"
+  }
+}
