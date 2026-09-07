@@ -1,5 +1,5 @@
 // fetch_news.mjs
-// RSS tabanlı haber toplayıcı — sadece başlık + özet + link + kaynak alır,
+// RSS tabanlı haber toplayıcı — sadece başlık + özet + link + kaynak + görsel alır,
 // tam makale metnini ASLA kopyalamaz.
 
 import { XMLParser } from "fast-xml-parser";
@@ -27,9 +27,6 @@ const FEEDS = [
   // --- NRW / Köln bölgesel kaynaklar ---
   { kaynak: "wdr",       kaynak_ad: "WDR",                  kategori: "NRW",  url: "https://www.wdr.de/xml/newsticker.rdf" },
   { kaynak: "ksta",      kaynak_ad: "Kölner Stadt-Anzeiger",kategori: "Köln", url: "https://feed.ksta.de/feed/rss/index.rss" },
-  // Not: Kölnische Rundschau (rundschau-online.de) ve Express Köln (express.de) artık genel
-  // erişime açık bir RSS beslemesi yayınlamıyor (404/410 döndürüyorlar). Yeni bir adres
-  // bulunursa buraya aynı formatta eklenebilir.
 ];
 
 const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: "@_" });
@@ -59,6 +56,21 @@ function truncate(str = "", max = 260) {
   const clean = stripHtml(str);
   if (clean.length <= max) return clean;
   return clean.slice(0, max).replace(/\s+\S*$/, "") + "…";
+}
+
+function extractImage(item) {
+  const media = item["media:thumbnail"] || item["media:content"];
+  if (media) {
+    const m = Array.isArray(media) ? media[0] : media;
+    if (m?.["@_url"]) return m["@_url"];
+  }
+  if (item.enclosure?.["@_url"] && /^image\//.test(item.enclosure?.["@_type"] || "")) {
+    return item.enclosure["@_url"];
+  }
+  const html = item["content:encoded"] || item.description || "";
+  const htmlStr = typeof html === "string" ? html : (html?.["#text"] || "");
+  const match = htmlStr.match(/<img[^>]+src=["']([^"']+)["']/i);
+  return match ? match[1] : null;
 }
 
 async function fetchFeed(feed) {
@@ -93,6 +105,7 @@ async function fetchFeed(feed) {
         kategori: feed.kategori,
         yayin_tarihi: new Date(pubDate).toISOString(),
         durum: "yayinda",
+        gorsel_url: extractImage(item),
       };
     }).filter(n => n.baslik && n.link);
   } catch (err) {
