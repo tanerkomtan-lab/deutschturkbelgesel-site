@@ -8,10 +8,20 @@ const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
 const SUPABASE_TABLE = process.env.SUPABASE_TABLE || "dth_haberler";
 
+// Wayback Machine (archive.org) entegrasyonu isteğe bağlıdır ve varsayılan
+// olarak KAPALIDIR, çünkü her haber için ek bir/iki istek gönderdiği için
+// script'in çalışma süresini ciddi şekilde uzatabilir ve archive.org'u
+// gereksiz yere yorabilir. Açmak için ortam değişkenini "true" yapın:
+//   ENABLE_WAYBACK=true node fetch_news.mjs
+const ENABLE_WAYBACK = (process.env.ENABLE_WAYBACK || "false").toLowerCase() === "true";
+
 if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
   console.error("HATA: SUPABASE_URL ve SUPABASE_SERVICE_KEY ortam değişkenlerini ayarlayın.");
   process.exit(1);
 }
+
+// NOT: Supabase tablonuza arsiv_url (text, nullable) sütununu eklemeniz gerekir:
+//   alter table dth_haberler add column if not exists arsiv_url text;
 
 const FEEDS = [
   { kaynak: "bbc",       kaynak_ad: "BBC",                  kategori: "Dünya",   url: "https://feeds.bbci.co.uk/news/world/rss.xml" },
@@ -27,6 +37,24 @@ const FEEDS = [
   // --- NRW / Köln bölgesel kaynaklar ---
   { kaynak: "wdr",       kaynak_ad: "WDR",                  kategori: "NRW",  url: "https://www.wdr.de/xml/newsticker.rdf" },
   { kaynak: "ksta",      kaynak_ad: "Kölner Stadt-Anzeiger",kategori: "Köln", url: "https://feed.ksta.de/feed/rss/index.rss" },
+
+  // --- archive.org / Internet Archive TV News Archive kanalları ---
+  // archive.org, her TV kanalını kendi koleksiyonunda (ör. "TV-CNNW") tutuyor
+  // ve her koleksiyon için gerçek bir RSS besliyor: aşağıdaki URL şablonu budur:
+  //   https://archive.org/services/collection-rss.php?collection=TV-{KANAL_KODU}
+  // Bu satırlar diğer kaynaklarla (BBC, CNN, DW...) TAMAMEN AYNI mekanizmayı
+  // (fetchFeed) kullanır — özel kod gerekmez. Aşağıdakiler tarayıcıda test
+  // edilip DOĞRULANDI (link, başlık, özet, görsel geliyor):
+  { kaynak: "ia_cnnw",     kaynak_ad: "Internet Archive - CNN",      kategori: "Arşiv", url: "https://archive.org/services/collection-rss.php?collection=TV-CNNW" },
+  { kaynak: "ia_foxnewsw", kaynak_ad: "Internet Archive - Fox News", kategori: "Arşiv", url: "https://archive.org/services/collection-rss.php?collection=TV-FOXNEWSW" },
+  { kaynak: "ia_msnbcw",   kaynak_ad: "Internet Archive - MSNBC",    kategori: "Arşiv", url: "https://archive.org/services/collection-rss.php?collection=TV-MSNBCW" },
+
+  // Aşağıdakiler DOĞRULANMADI (deneme sırasında geçici sunucu hatası aldım /
+  // kanal kodunu kesin teyit edemedim). Muhtemelen doğrudur ama devreye almadan
+  // önce URL'yi tarayıcıda açıp gerçekten haber döndürdüğünü kontrol edin:
+  // { kaynak: "ia_bbcnews", kaynak_ad: "Internet Archive - BBC News", kategori: "Arşiv", url: "https://archive.org/services/collection-rss.php?collection=TV-BBCNEWS" },
+  // { kaynak: "ia_dw",      kaynak_ad: "Internet Archive - DW",       kategori: "Arşiv", url: "https://archive.org/services/collection-rss.php?collection=TV-DW" },
+  // { kaynak: "ia_aljazam", kaynak_ad: "Internet Archive - Al Jazeera", kategori: "Arşiv", url: "https://archive.org/services/collection-rss.php?collection=TV-ALJAZAM" },
 ];
 
 // RSS'te görsel bulunamayan haberler için makale sayfasından og:image çekilirken
@@ -34,6 +62,12 @@ const FEEDS = [
 const OG_IMAGE_CONCURRENCY = 5;
 // og:image için sayfa çekme zaman aşımı (ms)
 const OG_IMAGE_TIMEOUT_MS = 8000;
+
+// Wayback Machine istekleri için eşzamanlılık ve zaman aşımı. "Save Page Now"
+// isteği (yeni arşivleme) mevcut kopya kontrolünden çok daha yavaş olduğu için
+// düşük tutulur.
+const WAYBACK_CONCURRENCY = 3;
+const WAYBACK_TIMEOUT_MS = 12000;
 
 const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: "@_" });
 
@@ -117,6 +151,56 @@ async function fetchOgImage(link) {
   }
 }
 
+// archive.org'un "Availability API"si üzerinden bir linkin daha önceden
+// arşivlenmiş bir kopyası olup olmadığına bakar. Varsa en yakın snapshot'ın
+// URL'sini döner, yoksa null.
+async function checkWaybackAvailability(link) {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), WAYBACK_TIMEOUT_MS);
+    const res = await fetch(
+      `https://archive.org/wayback/available?url=${encodeURIComponent(link)}`,
+      { signal: controller.signal }
+    );
+    clearTimeout(timeout);
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data?.archived_snapshots?.closest?.url || null;
+  } catch {
+    return null;
+  }
+}
+
+// Var olan bir kopya yoksa, Wayback Machine'in "Save Page Now" servisine
+// arşivleme isteği gönderir ve oluşturulan snapshot'ın URL'sini döner.
+// Bu istek yavaş olabilir (archive.org sayfayı gerçekten indirir), bu yüzden
+// zaman aşımına uğrarsa veya hata verirse sessizce null döner — akış durmaz.
+async function requestWaybackSave(link) {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), WAYBACK_TIMEOUT_MS);
+    const res = await fetch(`https://web.archive.org/save/${link}`, {
+      method: "GET",
+      redirect: "follow",
+      headers: { "User-Agent": "DeutschTurkHaber-Agent/1.0" },
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+    const contentLocation = res.headers.get("content-location");
+    if (contentLocation) return `https://web.archive.org${contentLocation}`;
+    if (res.url && res.url.includes("web.archive.org/web/")) return res.url;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchWaybackUrl(link) {
+  const existing = await checkWaybackAvailability(link);
+  if (existing) return existing;
+  return requestWaybackSave(link);
+}
+
 // Basit eşzamanlılık sınırlayıcı: bir dizi işi en fazla `limit` tanesi aynı anda çalışacak şekilde yürütür.
 async function mapWithConcurrency(items, limit, worker) {
   const results = new Array(items.length);
@@ -164,6 +248,7 @@ async function fetchFeed(feed) {
         yayin_tarihi: new Date(pubDate).toISOString(),
         durum: "yayinda",
         gorsel_url: extractImage(item),
+        arsiv_url: null,
       };
     }).filter(n => n.baslik && n.link);
 
@@ -172,6 +257,13 @@ async function fetchFeed(feed) {
     if (eksikGorselli.length > 0) {
       await mapWithConcurrency(eksikGorselli, OG_IMAGE_CONCURRENCY, async (row) => {
         row.gorsel_url = await fetchOgImage(row.link);
+      });
+    }
+
+    // archive.org üzerinde kalıcı bir kopya oluştur/kontrol et (isteğe bağlı).
+    if (ENABLE_WAYBACK) {
+      await mapWithConcurrency(rows, WAYBACK_CONCURRENCY, async (row) => {
+        row.arsiv_url = await fetchWaybackUrl(row.link);
       });
     }
 
@@ -206,9 +298,14 @@ async function main() {
   for (const feed of FEEDS) {
     const rows = await fetchFeed(feed);
     const gorselli = rows.filter(r => r.gorsel_url).length;
-    console.log(`${feed.kaynak}: ${rows.length} haber bulundu, ${gorselli} tanesinde görsel var.`);
+    const arsivli = rows.filter(r => r.arsiv_url).length;
+    console.log(
+      `${feed.kaynak}: ${rows.length} haber bulundu, ${gorselli} tanesinde görsel var` +
+      (ENABLE_WAYBACK ? `, ${arsivli} tanesi arşivlendi.` : ".")
+    );
     await upsertNews(rows);
   }
+
   console.log("Tamamlandı.");
 }
 
