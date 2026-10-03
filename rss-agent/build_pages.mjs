@@ -1,6 +1,6 @@
 // rss-agent/build_pages.mjs
 // Supabase'deki haberlerden statik sayfalar (/haber/ID.html) ve sitemap.xml üretir.
-// Sadece "yorum" (özgün editör notu) olan sayfalar indekslenir ve sitemap'e girer.
+// Sadece "yorum" (özgün editör notu) olan haberler için sayfa üretilir ve sitemap'e girer.
 
 import { mkdir, writeFile, rm } from "node:fs/promises";
 import path from "node:path";
@@ -42,15 +42,12 @@ async function load() {
 
 function pageHtml(n, related) {
   const url = `${SITE}/haber/${encodeURIComponent(n.id)}.html`;
-  const indexable = !!(n.yorum && n.yorum.trim().length > 120);
   const eu = encodeURIComponent(url);
   const et = encodeURIComponent(n.baslik || "");
   const desc = esc((n.yorum || n.ozet || "").slice(0, 155));
   const kaynak = esc(n.kaynak_ad || n.kaynak || "");
 
-  const yorumBlock = indexable
-    ? `<section class="note"><h2>Almanya'daki Türkler için ne anlama geliyor?</h2><p>${esc(n.yorum).replace(/\n+/g, "</p><p>")}</p></section>`
-    : "";
+  const yorumBlock = `<section class="note"><h2>Almanya'daki Türkler için ne anlama geliyor?</h2><p>${esc(n.yorum).replace(/\n+/g, "</p><p>")}</p></section>`;
 
   const relHtml = related.map(r =>
     `<li><a href="/haber/${encodeURIComponent(r.id)}.html">${esc(r.baslik)}</a></li>`).join("");
@@ -63,7 +60,7 @@ function pageHtml(n, related) {
 <title>${esc(n.baslik)} | DeutschTürkHaber</title>
 <meta name="description" content="${desc}">
 <link rel="canonical" href="${url}">
-<meta name="robots" content="${indexable ? "index,follow" : "noindex,follow"}">
+<meta name="robots" content="index,follow">
 <meta property="og:type" content="article">
 <meta property="og:title" content="${esc(n.baslik)}">
 <meta property="og:description" content="${desc}">
@@ -116,7 +113,7 @@ footer a{color:var(--dim);margin:0 8px}
 </main>
 <footer>
   <p>Başlık ve özetler ilgili kaynaklardan derlenir; telif hakları yayıncılara aittir.</p>
-  <p><a href="/">Ana sayfa</a></p>
+  <p><a href="/">Ana sayfa</a><a href="/hakkimizda.html">Hakkımızda</a><a href="/impressum.html">Impressum</a><a href="/gizlilik.html">Gizlilik</a></p>
 </footer>
 </body>
 </html>`;
@@ -129,15 +126,17 @@ async function main() {
   await rm(OUT_DIR, { recursive: true, force: true });
   await mkdir(OUT_DIR, { recursive: true });
 
-  const indexed = [];
-  for (const n of news) {
-    const related = news.filter(r => r.kategori === n.kategori && r.id !== n.id).slice(0, 5);
+  const indexed = news.filter(n => n.yorum && n.yorum.trim().length > 120);
+  for (const n of indexed) {
+    const related = indexed.filter(r => r.kategori === n.kategori && r.id !== n.id).slice(0, 5);
     await writeFile(path.join(OUT_DIR, `${n.id}.html`), pageHtml(n, related), "utf8");
-    if (n.yorum && n.yorum.trim().length > 120) indexed.push(n);
   }
 
   const urls = [
     `  <url><loc>${SITE}/</loc><lastmod>${new Date().toISOString().slice(0, 10)}</lastmod><changefreq>hourly</changefreq><priority>1.0</priority></url>`,
+    `  <url><loc>${SITE}/hakkimizda.html</loc><priority>0.3</priority></url>`,
+    `  <url><loc>${SITE}/impressum.html</loc><priority>0.3</priority></url>`,
+    `  <url><loc>${SITE}/gizlilik.html</loc><priority>0.3</priority></url>`,
     ...indexed.map(n => {
       const d = new Date(n.yayin_tarihi || Date.now()).toISOString().slice(0, 10);
       return `  <url><loc>${SITE}/haber/${encodeURIComponent(n.id)}.html</loc><lastmod>${d}</lastmod><priority>0.7</priority></url>`;
@@ -146,7 +145,7 @@ async function main() {
   const sitemap = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.join("\n")}\n</urlset>\n`;
   await writeFile(path.join(ROOT, "sitemap.xml"), sitemap, "utf8");
 
-  console.log(`${news.length} sayfa üretildi, ${indexed.length} tanesi sitemap'e eklendi.`);
+  console.log(`${indexed.length} haber sayfası üretildi, sitemap güncellendi.`);
 }
 
 main().catch(e => { console.error(e); process.exit(1); });
