@@ -131,6 +131,19 @@
   .card-links { display: flex; align-items: center; gap: 14px; }
   .read-link { color: var(--accent); font-weight: 700; text-decoration: none; }
   .archive-link { color: var(--text-dim); font-weight: 700; text-decoration: underline; text-underline-offset: 2px; }
+
+  /* Kart altı paylaşım satırı */
+  .share-row { display: flex; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+  .sh {
+    flex: 1; text-align: center; padding: 10px 0; font-size: 11px; font-weight: 800;
+    border: 1px solid var(--border); color: var(--text); text-decoration: none; border-radius: 3px;
+    background: var(--bg);
+  }
+  .sh:active { border-color: var(--accent); color: var(--accent); }
+  .sh.wa { border-color: #25d366; color: #25d366; }
+  .sh.tg { border-color: #29a9eb; color: #29a9eb; }
+  .sh.fb { border-color: #4c8bf5; color: #4c8bf5; }
+
   .hero-card { margin-bottom: 30px; border: 1px solid var(--border); background: var(--bg-card); }
   .hero-card .card-image, .hero-card .card-image-placeholder { height: 220px; }
   .hero-card .card-body { padding: 20px; }
@@ -382,13 +395,14 @@ function imageBlockHtml(n) {
   return `<div class="card-image-placeholder">${escapeHtml(n.kaynak_ad || n.kaynak || "")}</div>`;
 }
 
-// Bir haberin kart gövdesini (üst satır + başlık + özet + alt linkler) üretir.
-// hero=true iken hero-card sınıfı eklenir, aksi halde normal grid kartı olur.
+// Kart markup'ı: üst satır + başlık + özet + alt linkler + paylaşım satırı
 function newsCardMarkup(n, hero) {
   const safeTitle = escapeHtml(n.baslik || "");
   const safeDesc = escapeHtml(n.ozet || "");
   const safeLink = escapeHtml(n.link || "");
   const safeArsiv = n.arsiv_url ? escapeHtml(n.arsiv_url) : "";
+  const eu = encodeURIComponent(n.link || "");
+  const et = encodeURIComponent(n.baslik || "");
   return `
     <div class="${hero ? "hero-card card" : "card"}" data-link="${safeLink}">
       ${imageBlockHtml(n)}
@@ -408,6 +422,12 @@ function newsCardMarkup(n, hero) {
             <a class="read-link" href="${safeLink}" target="_blank" rel="noopener noreferrer">Habere Git →</a>
           </span>
         </div>
+        <div class="share-row">
+          <a class="sh wa" href="https://wa.me/?text=${et}%20${eu}" target="_blank" rel="noopener noreferrer">WhatsApp</a>
+          <a class="sh x" href="https://twitter.com/intent/tweet?url=${eu}&text=${et}" target="_blank" rel="noopener noreferrer">X</a>
+          <a class="sh fb" href="https://www.facebook.com/sharer/sharer.php?u=${eu}" target="_blank" rel="noopener noreferrer">Facebook</a>
+          <a class="sh tg" href="https://t.me/share/url?url=${eu}&text=${et}" target="_blank" rel="noopener noreferrer">Telegram</a>
+        </div>
       </div>
     </div>`;
 }
@@ -422,10 +442,7 @@ function formatDate(d) {
 }
 function escapeHtml(str) { const div = document.createElement("div"); div.textContent = str; return div.innerHTML; }
 
-// --- Kart tıklama: paylaş / arşiv / "habere git" linkleri dışındaki her yere
-// dokunmak haberi yeni sekmede açar. Bu tek dinleyici #content köküne bağlanır,
-// render() her innerHTML güncellemesinde bu dinleyiciyi silmediği için tekrar
-// eklemeye gerek yoktur (event delegation). ---
+// Kart tıklama: paylaş / arşiv / "habere git" / paylaşım satırı dışında her yer haberi yeni sekmede açar.
 document.getElementById("content").addEventListener("click", (e) => {
   const shareBtn = e.target.closest(".share-btn");
   if (shareBtn) {
@@ -434,8 +451,8 @@ document.getElementById("content").addEventListener("click", (e) => {
     handleShareClick(shareBtn.dataset.link, shareBtn.dataset.title);
     return;
   }
-  if (e.target.closest(".archive-link") || e.target.closest(".read-link")) {
-    return; // kendi href'i zaten yeni sekmede açılır, karta tekrar tıklamış gibi davranma
+  if (e.target.closest(".archive-link") || e.target.closest(".read-link") || e.target.closest(".share-row")) {
+    return;
   }
   const card = e.target.closest(".card");
   if (card && card.dataset.link) {
@@ -443,18 +460,14 @@ document.getElementById("content").addEventListener("click", (e) => {
   }
 });
 
-// --- Sosyal medya paylaşımı ---
-// Mobilde native paylaşım menüsü (navigator.share) varsa onu kullanır;
-// yoksa (masaüstü tarayıcılar gibi) WhatsApp/X/Facebook/Telegram/kopyala
-// seçeneklerini gösteren basit bir modal açar.
+// Sosyal medya paylaşımı (sağ üstteki ⤴ butonu)
 async function handleShareClick(link, title) {
   if (navigator.share) {
     try {
       await navigator.share({ title, url: link });
       return;
     } catch (err) {
-      if (err && err.name === "AbortError") return; // kullanıcı iptal etti
-      // diğer hatalarda modal'a düş
+      if (err && err.name === "AbortError") return;
     }
   }
   openShareModal(link, title);
