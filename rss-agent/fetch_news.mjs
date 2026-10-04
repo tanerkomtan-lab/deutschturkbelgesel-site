@@ -1,149 +1,271 @@
-// rss-agent/build_pages.mjs
-// Supabase'deki haberlerden statik sayfalar (/haber/ID.html) ve sitemap.xml üretir.
-// Sadece "yorum" (özgün editör notu) olan haberler için sayfa üretilir ve sitemap'e girer.
+// fetch_news.mjs
+// RSS tabanlı haber toplayıcı — sadece başlık + özet + link + kaynak + görsel alır,
+// tam makale metnini ASLA kopyalamaz.
 
-import { mkdir, writeFile, rm } from "node:fs/promises";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { XMLParser } from "fast-xml-parser";
 
-const SITE = "https://deutschturkhaber.com";
 const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_KEY = process.env.SUPABASE_KEY || process.env.SUPABASE_SERVICE_KEY;
-const TABLE = process.env.SUPABASE_TABLE || "dth_haberler";
+const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
+const SUPABASE_TABLE = process.env.SUPABASE_TABLE || "dth_haberler";
 
-if (!SUPABASE_URL || !SUPABASE_KEY) {
-  console.error("HATA: SUPABASE_URL ve SUPABASE_KEY gerekli.");
+// Wayback Machine entegrasyonu isteğe bağlıdır ve varsayılan olarak KAPALIDIR.
+const ENABLE_WAYBACK = (process.env.ENABLE_WAYBACK || "false").toLowerCase() === "true";
+
+if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
+  console.error("HATA: SUPABASE_URL ve SUPABASE_SERVICE_KEY ortam değişkenlerini ayarlayın.");
   process.exit(1);
 }
 
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const OUT_DIR = path.join(ROOT, "haber");
+const FEEDS = [
+  { kaynak: "bbc",       kaynak_ad: "BBC",                  kategori: "Dünya",   url: "https://feeds.bbci.co.uk/news/world/rss.xml" },
+  { kaynak: "bbc_tr",    kaynak_ad: "BBC Türkçe",           kategori: "Türkiye", url: "https://feeds.bbci.co.uk/turkce/rss.xml" },
+  { kaynak: "cnn",       kaynak_ad: "CNN",                  kategori: "Dünya",   url: "http://rss.cnn.com/rss/cnn_topstories.rss" },
+  { kaynak: "dw",        kaynak_ad: "DW",                   kategori: "Almanya", url: "https://rss.dw.com/rdf/rss-en-ger" },
+  { kaynak: "dw_tr",     kaynak_ad: "DW Türkçe",            kategori: "Almanya", url: "https://rss.dw.com/rdf/rss-tur-all" },
+  { kaynak: "euronews",  kaynak_ad: "Euronews",             kategori: "Avrupa",  url: "https://www.euronews.com/rss" },
+  { kaynak: "aljazeera", kaynak_ad: "Al Jazeera",           kategori: "Dünya",   url: "https://www.aljazeera.com/xml/rss/all.xml" },
+  { kaynak: "hurriyet",  kaynak_ad: "Hürriyet",             kategori: "Türkiye", url: "https://www.hurriyet.com.tr/rss/anasayfa" },
+  { kaynak: "ntv",       kaynak_ad: "NTV",                  kategori: "Türkiye", url: "https://www.ntv.com.tr/son-dakika.rss" },
 
-const esc = (s = "") =>
-  String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  // --- NRW / Köln bölgesel kaynaklar ---
+  { kaynak: "wdr",       kaynak_ad: "WDR",                  kategori: "NRW",  url: "https://www.wdr.de/xml/newsticker.rdf" },
+  { kaynak: "ksta",      kaynak_ad: "Kölner Stadt-Anzeiger",kategori: "Köln", url: "https://feed.ksta.de/feed/rss/index.rss" },
 
-const fmtDate = (d) => {
-  try { return new Date(d).toLocaleDateString("tr-TR", { day: "2-digit", month: "long", year: "numeric" }); }
-  catch { return ""; }
-};
+  // --- Internet Archive TV News Archive ---
+  { kaynak: "ia_cnnw",     kaynak_ad: "Internet Archive - CNN",      kategori: "Arşiv", url: "https://archive.org/services/collection-rss.php?collection=TV-CNNW" },
+  { kaynak: "ia_foxnewsw", kaynak_ad: "Internet Archive - Fox News", kategori: "Arşiv", url: "https://archive.org/services/collection-rss.php?collection=TV-FOXNEWSW" },
+  { kaynak: "ia_msnbcw",   kaynak_ad: "Internet Archive - MSNBC",    kategori: "Arşiv", url: "https://archive.org/services/collection-rss.php?collection=TV-MSNBCW" },
+];
 
-async function load() {
-  const base = `${SUPABASE_URL}/rest/v1/${TABLE}`;
-  const headers = { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` };
-  const common = "baslik,ozet,link,kategori,kaynak,kaynak_ad,yayin_tarihi,gorsel_url,arsiv_url";
-  const q = (cols) =>
-    `${base}?select=id,${cols}&durum=eq.yayinda&order=yayin_tarihi.desc&limit=1000`;
+const OG_IMAGE_CONCURRENCY = 5;
+const OG_IMAGE_TIMEOUT_MS = 8000;
+const WAYBACK_CONCURRENCY = 3;
+const WAYBACK_TIMEOUT_MS = 12000;
 
-  let res = await fetch(q(common + ",yorum"), { headers });
-  if (!res.ok) res = await fetch(q(common), { headers });
-  if (!res.ok) throw new Error(`Supabase hata: ${res.status} ${await res.text()}`);
-  return res.json();
+const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: "@_" });
+
+function stripHtml(str = "") {
+  if (typeof str !== "string") {
+    if (str == null) return "";
+    if (typeof str === "object" && "#text" in str) str = str["#text"];
+    else str = String(str);
+  }
+  return str.replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").trim();
 }
 
-function pageHtml(n, related) {
-  const url = `${SITE}/haber/${encodeURIComponent(n.id)}.html`;
-  const eu = encodeURIComponent(url);
-  const et = encodeURIComponent(n.baslik || "");
-  const desc = esc((n.yorum || n.ozet || "").slice(0, 155));
-  const kaynak = esc(n.kaynak_ad || n.kaynak || "");
+function cleanLink(url = "") {
+  try {
+    const u = new URL(url);
+    [...u.searchParams.keys()].forEach(k => {
+      if (/^(utm_|at_|ns_)/i.test(k)) u.searchParams.delete(k);
+    });
+    return u.toString();
+  } catch {
+    return url;
+  }
+}
 
-  const yorumBlock = `<section class="note"><h2>Almanya'daki Türkler için ne anlama geliyor?</h2><p>${esc(n.yorum).replace(/\n+/g, "</p><p>")}</p></section>`;
+function truncate(str = "", max = 260) {
+  const clean = stripHtml(str);
+  if (clean.length <= max) return clean;
+  return clean.slice(0, max).replace(/\s+\S*$/, "") + "…";
+}
 
-  const relHtml = related.map(r =>
-    `<li><a href="/haber/${encodeURIComponent(r.id)}.html">${esc(r.baslik)}</a></li>`).join("");
+function extractImage(item) {
+  const media = item["media:thumbnail"] || item["media:content"];
+  if (media) {
+    const m = Array.isArray(media) ? media[0] : media;
+    if (m?.["@_url"]) return m["@_url"];
+  }
+  if (item.enclosure?.["@_url"] && /^image\//.test(item.enclosure?.["@_type"] || "")) {
+    return item.enclosure["@_url"];
+  }
+  const html = item["content:encoded"] || item.description || "";
+  const htmlStr = typeof html === "string" ? html : (html?.["#text"] || "");
+  const match = htmlStr.match(/<img[^>]+src=["']([^"']+)["']/i);
+  return match ? match[1] : null;
+}
 
-  return `<!DOCTYPE html>
-<html lang="tr">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>${esc(n.baslik)} | DeutschTürkHaber</title>
-<meta name="description" content="${desc}">
-<link rel="canonical" href="${url}">
-<meta name="robots" content="index,follow">
-<meta property="og:type" content="article">
-<meta property="og:title" content="${esc(n.baslik)}">
-<meta property="og:description" content="${desc}">
-<meta property="og:url" content="${url}">
-${n.gorsel_url ? `<meta property="og:image" content="${esc(n.gorsel_url)}">` : ""}
-<style>
-:root{--bg:#0a0a0a;--card:#141414;--accent:#ffcc00;--text:#fff;--dim:#a0a0a0;--border:#262626}
-*{box-sizing:border-box;margin:0;padding:0}
-body{font-family:-apple-system,BlinkMacSystemFont,"Helvetica Neue",Arial,sans-serif;background:var(--bg);color:var(--text);line-height:1.6}
-header{padding:14px 20px;border-bottom:1px solid var(--border)}
-header a{color:var(--accent);font-weight:900;text-decoration:none;letter-spacing:-.5px}
-main{max-width:760px;margin:0 auto;padding:20px}
-.badge{display:inline-block;font-size:10px;font-weight:800;color:#000;background:var(--accent);padding:3px 8px;border-radius:2px;text-transform:uppercase}
-.cat{font-size:11px;color:var(--dim);margin-left:8px;text-transform:uppercase}
-h1{font-size:26px;line-height:1.3;margin:14px 0 8px}
-.date{font-size:12px;color:var(--dim);margin-bottom:16px}
-img.hero{width:100%;max-height:380px;object-fit:cover;background:var(--border);margin-bottom:16px}
-.sum{color:#d0d0d0;font-size:16px;margin-bottom:20px}
-.note{background:var(--card);border:1px solid var(--border);border-left:4px solid var(--accent);padding:16px;margin:20px 0}
-.note h2{font-size:16px;color:var(--accent);margin-bottom:8px}.note p{margin-bottom:10px;font-size:15px}
-.btn{display:inline-block;padding:12px 18px;background:var(--accent);color:#000;font-weight:800;text-decoration:none;border-radius:3px;margin-right:10px;font-size:13px}
-.btn.alt{background:transparent;color:var(--dim);border:1px solid var(--border)}
-.share{display:flex;gap:8px;margin:22px 0;padding-top:16px;border-top:1px solid var(--border)}
-.share a{flex:1;text-align:center;padding:10px 0;font-size:11px;font-weight:800;border:1px solid var(--border);color:#fff;text-decoration:none;border-radius:3px}
-.rel h3{font-size:14px;color:var(--accent);margin:24px 0 8px;text-transform:uppercase}
-.rel li{list-style:none;border-bottom:1px solid var(--border);padding:10px 0}
-.rel a{color:#fff;text-decoration:none;font-size:14px}
-footer{border-top:1px solid var(--border);padding:24px 20px;text-align:center;font-size:12px;color:var(--dim)}
-footer a{color:var(--dim);margin:0 8px}
-</style>
-</head>
-<body>
-<header><a href="/">DEUTSCHTÜRKHABER</a></header>
-<main>
-  <span class="badge">${kaynak}</span><span class="cat">${esc(n.kategori || "")}</span>
-  <h1>${esc(n.baslik)}</h1>
-  <div class="date">${fmtDate(n.yayin_tarihi)}</div>
-  ${n.gorsel_url ? `<img class="hero" src="${esc(n.gorsel_url)}" alt="" loading="lazy">` : ""}
-  <p class="sum">${esc(n.ozet || "")}</p>
-  ${yorumBlock}
-  <a class="btn" href="${esc(n.link)}" target="_blank" rel="noopener noreferrer">Haberin tamamı: ${kaynak} →</a>
-  ${n.arsiv_url ? `<a class="btn alt" href="${esc(n.arsiv_url)}" target="_blank" rel="noopener noreferrer">Arşiv</a>` : ""}
-  <div class="share">
-    <a href="https://wa.me/?text=${et}%20${eu}" target="_blank" rel="noopener noreferrer">WhatsApp</a>
-    <a href="https://twitter.com/intent/tweet?url=${eu}&text=${et}" target="_blank" rel="noopener noreferrer">X</a>
-    <a href="https://www.facebook.com/sharer/sharer.php?u=${eu}" target="_blank" rel="noopener noreferrer">Facebook</a>
-    <a href="https://t.me/share/url?url=${eu}&text=${et}" target="_blank" rel="noopener noreferrer">Telegram</a>
-  </div>
-  ${relHtml ? `<div class="rel"><h3>İlgili haberler</h3><ul>${relHtml}</ul></div>` : ""}
-</main>
-<footer>
-  <p>Başlık ve özetler ilgili kaynaklardan derlenir; telif hakları yayıncılara aittir.</p>
-  <p><a href="/">Ana sayfa</a></p>
-</footer>
-</body>
-</html>`;
+async function fetchOgImage(link) {
+  if (!link) return null;
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), OG_IMAGE_TIMEOUT_MS);
+    const res = await fetch(link, {
+      headers: { "User-Agent": "Mozilla/5.0 (compatible; DeutschTurkHaber-Agent/1.0)" },
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+    if (!res.ok) return null;
+
+    const reader = res.body.getReader();
+    let html = "";
+    const decoder = new TextDecoder();
+    while (html.length < 60000) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      html += decoder.decode(value, { stream: true });
+      if (/<\/head>/i.test(html)) break;
+    }
+    reader.cancel().catch(() => {});
+
+    const ogMatch =
+      html.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i) ||
+      html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i) ||
+      html.match(/<meta[^>]+name=["']twitter:image["'][^>]+content=["']([^"']+)["']/i);
+
+    return ogMatch ? ogMatch[1] : null;
+  } catch {
+    return null;
+  }
+}
+
+async function checkWaybackAvailability(link) {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), WAYBACK_TIMEOUT_MS);
+    const res = await fetch(
+      `https://archive.org/wayback/available?url=${encodeURIComponent(link)}`,
+      { signal: controller.signal }
+    );
+    clearTimeout(timeout);
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data?.archived_snapshots?.closest?.url || null;
+  } catch {
+    return null;
+  }
+}
+
+async function requestWaybackSave(link) {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), WAYBACK_TIMEOUT_MS);
+    const res = await fetch(`https://web.archive.org/save/${link}`, {
+      method: "GET",
+      redirect: "follow",
+      headers: { "User-Agent": "DeutschTurkHaber-Agent/1.0" },
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+    const contentLocation = res.headers.get("content-location");
+    if (contentLocation) return `https://web.archive.org${contentLocation}`;
+    if (res.url && res.url.includes("web.archive.org/web/")) return res.url;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchWaybackUrl(link) {
+  const existing = await checkWaybackAvailability(link);
+  if (existing) return existing;
+  return requestWaybackSave(link);
+}
+
+async function mapWithConcurrency(items, limit, worker) {
+  const results = new Array(items.length);
+  let index = 0;
+  async function run() {
+    while (index < items.length) {
+      const current = index++;
+      results[current] = await worker(items[current], current);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, run));
+  return results;
+}
+
+async function fetchFeed(feed) {
+  try {
+    const res = await fetch(feed.url, { headers: { "User-Agent": "DeutschTurkHaber-Agent/1.0" } });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const xml = await res.text();
+    const data = parser.parse(xml);
+
+    const items =
+      data?.rss?.channel?.item ||
+      data?.["rdf:RDF"]?.item ||
+      data?.feed?.entry ||
+      [];
+    const list = (Array.isArray(items) ? items : [items]).slice(0, 40);
+
+    const rows = list.filter(Boolean).map(item => {
+      const title = stripHtml(item.title?.["#text"] || item.title || "");
+      const rawSummary = item.description || item.summary || item["content:encoded"] || "";
+      const ozet = truncate(rawSummary, 260);
+      const link = cleanLink(
+        item.link?.["@_href"] || item.link || item.guid?.["#text"] || item.guid || ""
+      );
+      const pubDate = item.pubDate || item.published || item.updated || new Date().toISOString();
+
+      return {
+        baslik: title,
+        ozet,
+        link,
+        kaynak: feed.kaynak,
+        kaynak_ad: feed.kaynak_ad,
+        kategori: feed.kategori,
+        yayin_tarihi: new Date(pubDate).toISOString(),
+        durum: "yayinda",
+        gorsel_url: extractImage(item),
+        arsiv_url: null,
+      };
+    }).filter(n => n.baslik && n.link);
+
+    const eksikGorselli = rows.filter(r => !r.gorsel_url);
+    if (eksikGorselli.length > 0) {
+      await mapWithConcurrency(eksikGorselli, OG_IMAGE_CONCURRENCY, async (row) => {
+        row.gorsel_url = await fetchOgImage(row.link);
+      });
+    }
+
+    if (ENABLE_WAYBACK) {
+      await mapWithConcurrency(rows, WAYBACK_CONCURRENCY, async (row) => {
+        row.arsiv_url = await fetchWaybackUrl(row.link);
+      });
+    }
+
+    return rows;
+  } catch (err) {
+    console.error(`[UYARI] ${feed.kaynak} (${feed.url}) çekilemedi: ${err.message}`);
+    return [];
+  }
+}
+
+async function upsertNews(rows) {
+  if (rows.length === 0) return;
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_TABLE}?on_conflict=link`, {
+    method: "POST",
+    headers: {
+      apikey: SUPABASE_SERVICE_KEY,
+      Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
+      "Content-Type": "application/json",
+      Prefer: "resolution=ignore-duplicates,return=minimal",
+    },
+    body: JSON.stringify(rows),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    console.error(`[HATA] Supabase upsert başarısız: ${res.status} ${text}`);
+  } else {
+    console.log(`[OK] ${rows.length} haber işlendi.`);
+  }
 }
 
 async function main() {
-  const news = await load();
-  console.log(`${news.length} haber alındı.`);
-
-  await rm(OUT_DIR, { recursive: true, force: true });
-  await mkdir(OUT_DIR, { recursive: true });
-
-  // Sadece özgün yorumu olan haberler için sayfa üret ve sitemap'e ekle.
-  const indexed = news.filter(n => n.yorum && n.yorum.trim().length > 120);
-  for (const n of indexed) {
-    const related = indexed.filter(r => r.kategori === n.kategori && r.id !== n.id).slice(0, 5);
-    await writeFile(path.join(OUT_DIR, `${n.id}.html`), pageHtml(n, related), "utf8");
+  for (const feed of FEEDS) {
+    const rows = await fetchFeed(feed);
+    const gorselli = rows.filter(r => r.gorsel_url).length;
+    const arsivli = rows.filter(r => r.arsiv_url).length;
+    console.log(
+      `${feed.kaynak}: ${rows.length} haber bulundu, ${gorselli} tanesinde görsel var` +
+      (ENABLE_WAYBACK ? `, ${arsivli} tanesi arşivlendi.` : ".")
+    );
+    await upsertNews(rows);
   }
 
-  const urls = [
-    `  <url><loc>${SITE}/</loc><lastmod>${new Date().toISOString().slice(0, 10)}</lastmod><changefreq>hourly</changefreq><priority>1.0</priority></url>`,
-    ...indexed.map(n => {
-      const d = new Date(n.yayin_tarihi || Date.now()).toISOString().slice(0, 10);
-      return `  <url><loc>${SITE}/haber/${encodeURIComponent(n.id)}.html</loc><lastmod>${d}</lastmod><priority>0.7</priority></url>`;
-    }),
-  ];
-  const sitemap = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.join("\n")}\n</urlset>\n`;
-  await writeFile(path.join(ROOT, "sitemap.xml"), sitemap, "utf8");
-
-  console.log(`${indexed.length} sayfa üretildi ve sitemap'e eklendi.`);
+  console.log("Tamamlandı.");
 }
 
-main().catch(e => { console.error(e); process.exit(1); });
+main();
